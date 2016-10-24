@@ -167,7 +167,35 @@ var emphasizeTests = []struct {
 func TestEmphasize(t *testing.T) {
 	for i, tt := range emphasizeTests {
 		var buf bytes.Buffer
-		emphasize(&buf, tt.in, nil, true)
+		emphasize(&buf, tt.in, nil, true, htmlFmtOpts)
+		out := buf.String()
+		if out != tt.out {
+			t.Errorf("#%d: mismatch\nhave: %v\nwant: %v", i, out, tt.out)
+		}
+	}
+}
+
+var emphasizeMarkdownTests = []struct {
+	in, out string
+}{
+	{"http://www.google.com/", `[http://www.google.com/](http://www.google.com/)`},
+	{"https://www.google.com/", `[https://www.google.com/](https://www.google.com/)`},
+	{"http://www.google.com/path.", `[http://www.google.com/path](http://www.google.com/path).`},
+	{"http://en.wikipedia.org/wiki/Camellia_(cipher)", `[http://en.wikipedia.org/wiki/Camellia_(cipher)](http://en.wikipedia.org/wiki/Camellia_(cipher))`},
+	{"(http://www.google.com/)", `([http://www.google.com/](http://www.google.com/))`},
+	{"http://gmail.com)", `[http://gmail.com](http://gmail.com))`},
+	{"((http://gmail.com))", `(([http://gmail.com](http://gmail.com)))`},
+	{"http://gmail.com ((http://gmail.com)) ()", `[http://gmail.com](http://gmail.com) (([http://gmail.com](http://gmail.com))) ()`},
+	{"Foo bar http://example.com/ quux!", `Foo bar [http://example.com/](http://example.com/) quux!`},
+	{"Hello http://example.com/%2f/ /world.", `Hello [http://example.com/%2f/](http://example.com/%2f/) /world.`},
+	{"Lorem http: ipsum //host/path", "Lorem http: ipsum //host/path"},
+	{"javascript://is/not/linked", "javascript://is/not/linked"},
+}
+
+func TestEmphasizeMarkdown(t *testing.T) {
+	for i, tt := range emphasizeMarkdownTests {
+		var buf bytes.Buffer
+		emphasize(&buf, tt.in, nil, true, markdownFmtOpts)
 		out := buf.String()
 		if out != tt.out {
 			t.Errorf("#%d: mismatch\nhave: %v\nwant: %v", i, out, tt.out)

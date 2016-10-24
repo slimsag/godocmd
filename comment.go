@@ -15,32 +15,35 @@ import (
 	"unicode/utf8"
 )
 
-var (
-	ldquo = []byte("&ldquo;")
-	rdquo = []byte("&rdquo;")
-)
-
 // Escape comment text for HTML. If nice is set,
 // also turn `` into &ldquo; and '' into &rdquo;.
-func commentEscape(w io.Writer, text string, nice bool) {
+func commentEscape(w io.Writer, text string, nice bool, opts fmtOpts) {
 	last := 0
 	if nice {
 		for i := 0; i < len(text)-1; i++ {
 			ch := text[i]
 			if ch == text[i+1] && (ch == '`' || ch == '\'') {
-				template.HTMLEscape(w, []byte(text[last:i]))
+				if opts.ShouldHTMLEscape {
+					template.HTMLEscape(w, []byte(text[last:i]))
+				} else {
+					w.Write([]byte(text[last:i]))
+				}
 				last = i + 2
 				switch ch {
 				case '`':
-					w.Write(ldquo)
+					w.Write(opts.Backtick)
 				case '\'':
-					w.Write(rdquo)
+					w.Write(opts.Singlequote)
 				}
 				i++ // loop will add one more
 			}
 		}
 	}
-	template.HTMLEscape(w, []byte(text[last:]))
+	if opts.ShouldHTMLEscape {
+		template.HTMLEscape(w, []byte(text[last:]))
+	} else {
+		w.Write([]byte(text[last:]))
+	}
 }
 
 const (
@@ -58,20 +61,51 @@ const (
 
 var matchRx = regexp.MustCompile(`(` + urlRx + `)|(` + identRx + `)`)
 
-var (
-	html_a      = []byte(`<a href="`)
-	html_aq     = []byte(`">`)
-	html_enda   = []byte("</a>")
-	html_i      = []byte("<i>")
-	html_endi   = []byte("</i>")
-	html_p      = []byte("<p>\n")
-	html_endp   = []byte("</p>\n")
-	html_pre    = []byte("<pre>")
-	html_endpre = []byte("</pre>\n")
-	html_h      = []byte(`<h3 id="`)
-	html_hq     = []byte(`">`)
-	html_endh   = []byte("</h3>\n")
-)
+type fmtOpts struct {
+	ShouldHTMLEscape                       bool
+	URLBegin, URLBeginEnd, URLEnd          []byte
+	ItalicBegin, ItalicEnd                 []byte
+	ParagraphBegin, ParagraphEnd           []byte
+	PreBegin, PreEnd                       []byte
+	HeaderBegin, HeaderBeginEnd, HeaderEnd []byte
+	Backtick, Singlequote                  []byte
+}
+
+var htmlFmtOpts = fmtOpts{
+	ShouldHTMLEscape: true,
+	URLBegin:         []byte(`<a href="`),
+	URLBeginEnd:      []byte(`">`),
+	URLEnd:           []byte("</a>"),
+	ItalicBegin:      []byte("<i>"),
+	ItalicEnd:        []byte("</i>"),
+	ParagraphBegin:   []byte("<p>\n"),
+	ParagraphEnd:     []byte("</p>\n"),
+	PreBegin:         []byte("<pre>"),
+	PreEnd:           []byte("</pre>\n"),
+	HeaderBegin:      []byte(`<h3 id="`),
+	HeaderBeginEnd:   []byte(`">`),
+	HeaderEnd:        []byte("</h3>\n"),
+	Backtick:         []byte("&ldquo;"),
+	Singlequote:      []byte("&rdquo;"),
+}
+
+var markdownFmtOpts = fmtOpts{
+	ShouldHTMLEscape: false,
+	URLBegin:         []byte("["),
+	URLBeginEnd:      []byte("]("),
+	URLEnd:           []byte(")"),
+	ItalicBegin:      []byte("_"),
+	ItalicEnd:        []byte("_"),
+	ParagraphBegin:   []byte(""),
+	ParagraphEnd:     []byte("\n\n"),
+	PreBegin:         []byte("```\n"),
+	PreEnd:           []byte("\n```\n"),
+	HeaderBegin:      []byte("### "),
+	HeaderBeginEnd:   []byte(""),
+	HeaderEnd:        []byte("\n"),
+	Backtick:         []byte("`"),
+	Singlequote:      []byte("'"),
+}
 
 // pairedParensPrefixLen returns the length of the longest prefix of s containing paired parentheses.
 func pairedParensPrefixLen(s string) int {
@@ -104,7 +138,7 @@ func pairedParensPrefixLen(s string) int {
 // and the word is converted into a link. If nice is set, the remaining text's
 // appearance is improved where it makes sense (e.g., `` is turned into &ldquo;
 // and '' into &rdquo;).
-func emphasize(w io.Writer, line string, words map[string]string, nice bool) {
+func emphasize(w io.Writer, line string, words map[string]string, nice bool, opts fmtOpts) {
 	for {
 		m := matchRx.FindStringSubmatchIndex(line)
 		if m == nil {
@@ -113,7 +147,7 @@ func emphasize(w io.Writer, line string, words map[string]string, nice bool) {
 		// m >= 6 (two parenthesized sub-regexps in matchRx, 1st one is urlRx)
 
 		// write text before match
-		commentEscape(w, line[0:m[0]], nice)
+		commentEscape(w, line[0:m[0]], nice, opts)
 
 		// adjust match if necessary
 		match := line[m[0]:m[1]]
@@ -141,25 +175,29 @@ func emphasize(w io.Writer, line string, words map[string]string, nice bool) {
 
 		// write match
 		if len(url) > 0 {
-			w.Write(html_a)
-			template.HTMLEscape(w, []byte(url))
-			w.Write(html_aq)
+			w.Write(opts.URLBegin)
+			if opts.ShouldHTMLEscape {
+				template.HTMLEscape(w, []byte(url))
+			} else {
+				w.Write([]byte(url))
+			}
+			w.Write(opts.URLBeginEnd)
 		}
 		if italics {
-			w.Write(html_i)
+			w.Write(opts.ItalicBegin)
 		}
-		commentEscape(w, match, nice)
+		commentEscape(w, match, nice, opts)
 		if italics {
-			w.Write(html_endi)
+			w.Write(opts.ItalicEnd)
 		}
 		if len(url) > 0 {
-			w.Write(html_enda)
+			w.Write(opts.URLEnd)
 		}
 
 		// advance
 		line = line[m[1]:]
 	}
-	commentEscape(w, line, nice)
+	commentEscape(w, line, nice, opts)
 }
 
 func indentLen(s string) int {
@@ -287,35 +325,45 @@ func anchorID(line string) string {
 // map value is not the empty string, it is considered a URL and the word is converted
 // into a link.
 func ToHTML(w io.Writer, text string, words map[string]string) {
+	toFormatted(w, text, words, htmlFmtOpts)
+}
+
+// ToMarkdown is just like ToHTML, except it renders Markdown output instead
+// of HTML output.
+func ToMarkdown(w io.Writer, text string, words map[string]string) {
+	toFormatted(w, text, words, markdownFmtOpts)
+}
+
+func toFormatted(w io.Writer, text string, words map[string]string, opts fmtOpts) {
 	for _, b := range blocks(text) {
 		switch b.op {
 		case opPara:
-			w.Write(html_p)
+			w.Write(opts.ParagraphBegin)
 			for _, line := range b.lines {
-				emphasize(w, line, words, true)
+				emphasize(w, strings.Replace(line, "\n", " ", -1), words, true, opts)
 			}
-			w.Write(html_endp)
+			w.Write(opts.ParagraphEnd)
 		case opHead:
-			w.Write(html_h)
+			w.Write(opts.HeaderBegin)
 			id := ""
 			for _, line := range b.lines {
 				if id == "" {
 					id = anchorID(line)
 					w.Write([]byte(id))
-					w.Write(html_hq)
+					w.Write(opts.HeaderBeginEnd)
 				}
-				commentEscape(w, line, true)
+				commentEscape(w, line, true, opts)
 			}
 			if id == "" {
-				w.Write(html_hq)
+				w.Write(opts.HeaderBeginEnd)
 			}
-			w.Write(html_endh)
+			w.Write(opts.HeaderEnd)
 		case opPre:
-			w.Write(html_pre)
+			w.Write(opts.PreBegin)
 			for _, line := range b.lines {
-				emphasize(w, line, nil, false)
+				emphasize(w, line, nil, false, opts)
 			}
-			w.Write(html_endpre)
+			w.Write(opts.PreEnd)
 		}
 	}
 }
